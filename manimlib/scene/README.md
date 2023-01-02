@@ -31,7 +31,7 @@ The first thing `Scene.pre_play()` does is to verify if this is an interactive s
 
 - To mark a `Scene` as "interactive", it must be initialized with `presenter_mode=True`. By default, `Scene.presenter_mode` is set to False.
 - If `Scene.presenter_mode == True`, and this is the first time `Scene.play()` was called (`Scene.num_plays` represents the number of times `Scene.play()` or more specifically `Scene.post_play()` was called, so if it's 0 it means it was never called before), `Scene.pre_play()` calls `Scene.hold_loop()`, which represents the interactive scene loop.
-- What `Scene.hold_loop()` does is: while the `Scene.hold_on_wait` property remains True (it was already set to True in `Scene.__init__()` if `Scene.presenter_mode` was True), it repeatedly calls `Scene.update_frame()` which would keep the animation running. The only way to break this loop is defined in `Scene.on_key_press()`, where a series of events triggered by keyboard presses are defined. In particular, if the presenter presses Space or right key, `Scene.hold_on_wait` is set to False, breaking the loop in `Scene.hold_loop()` and ending this "interactive mode". Regardless. `Scene.hold_on_wait` is immediately set to True again. (TODO: an `EventListener` must be calling `Scene.on_key_press()`, but where is that `EventListener` being instantiated?)
+- What `Scene.hold_loop()` does is: while the `Scene.hold_on_wait` property remains True (it was already set to True in `Scene.__init__()` if `Scene.presenter_mode` was True), it repeatedly calls `Scene.update_frame()` which would keep the animation running. The only way to break this loop is defined in `Scene.on_key_press()`, where a series of events triggered by keyboard presses are defined. In particular, if the presenter presses Space or right key, `Scene.hold_on_wait` is set to False, breaking the loop in `Scene.hold_loop()` and ending this "interactive mode". Regardless. `Scene.hold_on_wait` is immediately set to True again. **(TODO: an `EventListener` must be calling `Scene.on_key_press()`, but where is that `EventListener` being instantiated?)**
 
 Then, it calls `Scene.update_skipping_status()`, which decides whether this animation should be skipped or not. This decision is mainly based on 3 properties: `Scene.original_skipping_status` (defined by the original value of `Scene.skip_animations`), `Scene.start_at_animation_number` and `Scene.end_at_animation_number`.
 
@@ -44,7 +44,7 @@ Then, it calls `Scene.update_skipping_status()`, which decides whether this anim
 
 If the current animation won't be skipped, `Scene.pre_play()` then prepares its `SceneFileWriter` to begin writing the animation into a file by calling `SceneFileWriter.begin_animation()` (don't confuse with `SceneFileWriter.begin()`, which was used in `Scene.run()`!). Explaining how it works is beyond the scope of this guide.
 
-Then, if "preview mode" is activated, we set the real animation and virtual animation start times. (TODO: still find out what are there times)
+Then, if "preview mode" is activated, we set the real animation and virtual animation start times. **(TODO: still find out what are those times)**
 
 - "Preview mode" is activated by default, and occurs when a Scene is instantiated with `preview=True`, which in turn creates a `Window` object (defined in maninlib/window) which is assigned to `Scene.window`.
 
