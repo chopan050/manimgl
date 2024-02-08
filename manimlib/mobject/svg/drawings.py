@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import itertools as it
 
 from manimlib.animation.composition import AnimationGroup
 from manimlib.animation.rotation import Rotating
@@ -14,6 +15,7 @@ from manimlib.constants import DOWN
 from manimlib.constants import FRAME_WIDTH
 from manimlib.constants import GREEN
 from manimlib.constants import GREEN_SCREEN
+from manimlib.constants import GREEN_E
 from manimlib.constants import GREY
 from manimlib.constants import GREY_A
 from manimlib.constants import GREY_B
@@ -26,21 +28,27 @@ from manimlib.constants import ORIGIN
 from manimlib.constants import OUT
 from manimlib.constants import PI
 from manimlib.constants import RED
-from manimlib.constants import RIGHT
+from manimlib.constants import RED_E
 from manimlib.constants import RIGHT
 from manimlib.constants import SMALL_BUFF
 from manimlib.constants import SMALL_BUFF
 from manimlib.constants import UP
-from manimlib.constants import UP
+from manimlib.constants import UL
+from manimlib.constants import UR
+from manimlib.constants import DL
+from manimlib.constants import DR
 from manimlib.constants import WHITE
 from manimlib.constants import YELLOW
+from manimlib.constants import TAU
 from manimlib.mobject.boolean_ops import Difference
 from manimlib.mobject.geometry import Arc
 from manimlib.mobject.geometry import Circle
+from manimlib.mobject.geometry import Dot
 from manimlib.mobject.geometry import Line
 from manimlib.mobject.geometry import Polygon
 from manimlib.mobject.geometry import Rectangle
 from manimlib.mobject.geometry import Square
+from manimlib.mobject.geometry import AnnularSector
 from manimlib.mobject.mobject import Mobject
 from manimlib.mobject.numbers import Integer
 from manimlib.mobject.svg.svg_mobject import SVGMobject
@@ -248,8 +256,6 @@ class Laptop(VGroup):
         self.axis = axis
 
         self.add(body, screen_plate, axis)
-        self.rotate(5 * np.pi / 12, LEFT, about_point=ORIGIN)
-        self.rotate(np.pi / 6, DOWN, about_point=ORIGIN)
 
 
 class VideoIcon(SVGMobject):
@@ -357,7 +363,7 @@ class Bubble(SVGMobject):
         stroke_width: float = 3.0,
         **kwargs
     ):
-        self.direction = direction
+        self.direction = LEFT  # Possibly updated below by self.flip()
         self.bubble_center_adjustment_factor = bubble_center_adjustment_factor
         self.content_scale_factor = content_scale_factor
 
@@ -379,8 +385,7 @@ class Bubble(SVGMobject):
         if direction[0] > 0:
             self.flip()
 
-        self.content = Mobject()
-        self.refresh_triangulation()
+        self.content = VMobject()
 
     def get_tip(self):
         # TODO, find a better way
@@ -403,10 +408,10 @@ class Bubble(SVGMobject):
             self.direction = -np.array(self.direction)
         return self
 
-    def pin_to(self, mobject):
+    def pin_to(self, mobject, auto_flip=False):
         mob_center = mobject.get_center()
         want_to_flip = np.sign(mob_center[0]) != np.sign(self.direction[0])
-        if want_to_flip:
+        if want_to_flip and auto_flip:
             self.flip()
         boundary_point = mobject.get_bounding_box_point(UP - self.direction)
         vector_from_center = 1.0 * (boundary_point - mob_center)
@@ -486,17 +491,29 @@ class VectorizedEarth(SVGMobject):
 
 
 class Piano(VGroup):
-    n_white_keys = 52
-    black_pattern = [0, 2, 3, 5, 6]
-    white_keys_per_octave = 7
-    white_key_dims = (0.15, 1.0)
-    black_key_dims = (0.1, 0.66)
-    key_buff = 0.02
-    white_key_color = WHITE
-    black_key_color = GREY_E
-    total_width = 13
+    def __init__(
+        self,
+        n_white_keys = 52,
+        black_pattern = [0, 2, 3, 5, 6],
+        white_keys_per_octave = 7,
+        white_key_dims = (0.15, 1.0),
+        black_key_dims = (0.1, 0.66),
+        key_buff = 0.02,
+        white_key_color = WHITE,
+        black_key_color = GREY_E,
+        total_width = 13,
+        **kwargs
+    ):
+        self.n_white_keys = n_white_keys
+        self.black_pattern = black_pattern
+        self.white_keys_per_octave = white_keys_per_octave
+        self.white_key_dims = white_key_dims
+        self.black_key_dims = black_key_dims
+        self.key_buff = key_buff
+        self.white_key_color = white_key_color
+        self.black_key_color = black_key_color
+        self.total_width = total_width
 
-    def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.add_white_keys()
         self.add_black_keys()
@@ -540,7 +557,7 @@ class Piano(VGroup):
 class Piano3D(VGroup):
     def __init__(
         self,
-        reflectiveness: float = 1.0,
+        shading: Tuple[float, float, float] = (1.0, 0.2, 0.2),
         stroke_width: float = 0.25,
         stroke_color: ManimColor = BLACK,
         key_depth: float = 0.1,
@@ -557,9 +574,102 @@ class Piano3D(VGroup):
             for key in piano_2d
         ))
         self.set_stroke(stroke_color, stroke_width)
+        self.set_shading(*shading)
         self.apply_depth_test()
 
         # Elevate black keys
         for i, key in enumerate(self):
             if piano_2d[i] in piano_2d.black_keys:
                 key.shift(black_key_shift * OUT)
+                key.set_color(BLACK)
+
+
+class DieFace(VGroup):
+    def __init__(
+        self,
+        value: int,
+        side_length: float = 1.0,
+        corner_radius: float = 0.15,
+        stroke_color: ManimColor = WHITE,
+        stroke_width: float = 2.0,
+        fill_color: ManimColor = GREY_E,
+        dot_radius: float = 0.08,
+        dot_color: ManimColor = WHITE,
+        dot_coalesce_factor: float = 0.5
+    ):
+        dot = Dot(radius=dot_radius, fill_color=dot_color)
+        square = Square(
+            side_length=side_length,
+            stroke_color=stroke_color,
+            stroke_width=stroke_width,
+            fill_color=fill_color,
+            fill_opacity=1.0,
+        )
+        square.round_corners(corner_radius)
+
+        if not (1 <= value <= 6):
+            raise Exception("DieFace only accepts integer inputs between 1 and 6")
+
+        edge_group = [
+            (ORIGIN,),
+            (UL, DR),
+            (UL, ORIGIN, DR),
+            (UL, UR, DL, DR),
+            (UL, UR, ORIGIN, DL, DR),
+            (UL, UR, LEFT, RIGHT, DL, DR),
+        ][value - 1]
+
+        arrangement = VGroup(*(
+            dot.copy().move_to(square.get_bounding_box_point(vect))
+            for vect in edge_group
+        ))
+        arrangement.space_out_submobjects(dot_coalesce_factor)
+
+        super().__init__(square, arrangement)
+        self.dots = arrangement
+        self.value = value
+        self.index = value
+
+
+class Dartboard(VGroup):
+    radius = 3
+    n_sectors = 20
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        n_sectors = self.n_sectors
+        angle = TAU / n_sectors
+
+        segments = VGroup(*[
+            VGroup(*[
+                AnnularSector(
+                    inner_radius=in_r,
+                    outer_radius=out_r,
+                    start_angle=n * angle,
+                    angle=angle,
+                    fill_color=color,
+                )
+                for n, color in zip(
+                    range(n_sectors),
+                    it.cycle(colors)
+                )
+            ])
+            for colors, in_r, out_r in [
+                ([GREY_B, GREY_E], 0, 1),
+                ([GREEN_E, RED_E], 0.5, 0.55),
+                ([GREEN_E, RED_E], 0.95, 1),
+            ]
+        ])
+        segments.rotate(-angle / 2)
+        bullseyes = VGroup(*[
+            Circle(radius=r)
+            for r in [0.07, 0.035]
+        ])
+        bullseyes.set_fill(opacity=1)
+        bullseyes.set_stroke(width=0)
+        bullseyes[0].set_color(GREEN_E)
+        bullseyes[1].set_color(RED_E)
+
+        self.bullseye = bullseyes[1]
+        self.add(*segments, *bullseyes)
+        self.scale(self.radius)

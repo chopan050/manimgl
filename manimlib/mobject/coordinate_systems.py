@@ -9,7 +9,6 @@ import itertools as it
 from manimlib.constants import BLACK, BLUE, BLUE_D, BLUE_E, GREEN, GREY_A, WHITE, RED
 from manimlib.constants import DEGREES, PI
 from manimlib.constants import DL, UL, DOWN, DR, LEFT, ORIGIN, OUT, RIGHT, UP
-from manimlib.constants import FRAME_HEIGHT, FRAME_WIDTH
 from manimlib.constants import FRAME_X_RADIUS, FRAME_Y_RADIUS
 from manimlib.constants import MED_SMALL_BUFF, SMALL_BUFF
 from manimlib.mobject.functions import ParametricCurve
@@ -22,6 +21,8 @@ from manimlib.mobject.svg.tex_mobject import Tex
 from manimlib.mobject.types.dot_cloud import DotCloud
 from manimlib.mobject.types.surface import ParametricSurface
 from manimlib.mobject.types.vectorized_mobject import VGroup
+from manimlib.mobject.types.vectorized_mobject import VMobject
+from manimlib.utils.bezier import inverse_interpolate
 from manimlib.utils.dict_ops import merge_dicts_recursively
 from manimlib.utils.simple_functions import binary_search
 from manimlib.utils.space_ops import angle_of_vector
@@ -32,9 +33,9 @@ from manimlib.utils.space_ops import normalize
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from typing import Callable, Iterable, Sequence, Type, TypeVar
+    from typing import Callable, Iterable, Sequence, Type, TypeVar, Optional
     from manimlib.mobject.mobject import Mobject
-    from manimlib.typing import ManimColor, Vect3, Vect3Array, VectN, RangeSpecifier
+    from manimlib.typing import ManimColor, Vect3, Vect3Array, VectN, RangeSpecifier, Self
 
     T = TypeVar("T", bound=Mobject)
 
@@ -54,7 +55,7 @@ class CoordinateSystem(ABC):
         self,
         x_range: RangeSpecifier = DEFAULT_X_RANGE,
         y_range: RangeSpecifier = DEFAULT_Y_RANGE,
-        num_sampled_graph_points_per_tick: int = 20,
+        num_sampled_graph_points_per_tick: int = 5,
     ):
         self.x_range = x_range
         self.y_range = y_range
@@ -174,6 +175,7 @@ class CoordinateSystem(ABC):
         self,
         function: Callable[[float], float],
         x_range: Sequence[float] | None = None,
+        bind: bool = False,
         **kwargs
     ) -> ParametricCurve:
         x_range = x_range or self.x_range
@@ -194,6 +196,10 @@ class CoordinateSystem(ABC):
         )
         graph.underlying_function = function
         graph.x_range = x_range
+
+        if bind:
+            self.bind_graph_to_func(graph, function)
+
         return graph
 
     def get_parametric_curve(
@@ -236,28 +242,33 @@ class CoordinateSystem(ABC):
         """
         return self.input_to_graph_point(x, graph)
 
-    def bind_graph_to_func(self, graph, func, jagged=False, get_discontinuities=None):
+    def bind_graph_to_func(
+        self,
+        graph: VMobject,
+        func: Callable[[VectN], VectN],
+        jagged: bool = False,
+        get_discontinuities: Optional[Callable[[], Vect3]] = None
+    ) -> VMobject:
         """
         Use for graphing functions which might change over time, or change with
         conditions
         """
-        x_values = [self.x_axis.p2n(p) for p in graph.get_points()]
+        x_values = np.array([self.x_axis.p2n(p) for p in graph.get_points()])
 
-        def get_x_values():
+        def get_graph_points():
+            xs = x_values
             if get_discontinuities:
                 ds = get_discontinuities()
                 ep = 1e-6
                 added_xs = it.chain(*((d - ep, d + ep) for d in ds))
-                return sorted([*x_values, *added_xs])[:len(x_values)]
-            else:
-                return x_values
+                xs[:] = sorted([*x_values, *added_xs])[:len(x_values)]
+            return self.c2p(xs, func(xs))
 
-        graph.add_updater(lambda g: g.set_points_as_corners([
-            self.c2p(x, func(x))
-            for x in get_x_values()
-        ]))
+        graph.add_updater(
+            lambda g: g.set_points_as_corners(get_graph_points())
+        )
         if not jagged:
-            graph.add_updater(lambda g: g.make_approximately_smooth())
+            graph.add_updater(lambda g: g.make_smooth(approx=True))
         return graph
 
     def get_graph_label(
@@ -393,9 +404,24 @@ class CoordinateSystem(ABC):
                 rect.set_fill(negative_color)
         return result
 
-    def get_area_under_graph(self, graph, x_range, fill_color=BLUE, fill_opacity=1):
-        # TODO
-        pass
+    def get_area_under_graph(self, graph, x_range, fill_color=BLUE, fill_opacity=0.5):
+        if not hasattr(graph, "x_range"):
+            raise Exception("Argument `graph` must have attribute `x_range`")
+
+        alpha_bounds = [
+            inverse_interpolate(*graph.x_range, x)
+            for x in x_range
+        ]
+        sub_graph = graph.copy()
+        sub_graph.pointwise_become_partial(graph, *alpha_bounds)
+        sub_graph.add_line_to(self.c2p(x_range[1], 0))
+        sub_graph.add_line_to(self.c2p(x_range[0], 0))
+        sub_graph.add_line_to(sub_graph.get_start())
+
+        sub_graph.set_stroke(width=0)
+        sub_graph.set_fill(fill_color, fill_opacity)
+
+        return sub_graph
 
 
 class Axes(VGroup, CoordinateSystem):
@@ -416,6 +442,7 @@ class Axes(VGroup, CoordinateSystem):
         **kwargs
     ):
         CoordinateSystem.__init__(self, x_range, y_range, **kwargs)
+        kwargs.pop("num_sampled_graph_points_per_tick", None)
         VGroup.__init__(self, **kwargs)
 
         axis_config = dict(**axis_config, unit_size=unit_size)
@@ -502,9 +529,8 @@ class ThreeDAxes(Axes):
         z_range: RangeSpecifier = (-4.0, 4.0, 1.0),
         z_axis_config: dict = dict(),
         z_normal: Vect3 = DOWN,
-        depth: float = 6.0,
-        num_axis_pieces: int = 20,
-        gloss: float = 0.5,
+        depth: float | None = None,
+        flat_stroke: bool = False,
         **kwargs
     ):
         Axes.__init__(self, x_range, y_range, **kwargs)
@@ -515,7 +541,7 @@ class ThreeDAxes(Axes):
             axis_config=merge_dicts_recursively(
                 self.default_axis_config,
                 self.default_z_axis_config,
-                kwargs.get("axes_config", {}),
+                kwargs.get("axis_config", {}),
                 z_axis_config
             ),
             length=depth,
@@ -529,8 +555,7 @@ class ThreeDAxes(Axes):
         self.axes.add(self.z_axis)
         self.add(self.z_axis)
 
-        for axis in self.axes:
-            axis.insert_n_curves(num_axis_pieces - 1)
+        self.set_flat_stroke(flat_stroke)
 
     def get_all_ranges(self) -> list[Sequence[float]]:
         return [self.x_range, self.y_range, self.z_range]
@@ -546,19 +571,46 @@ class ThreeDAxes(Axes):
             axis.add(label)
         self.axis_labels = labels
 
-    def get_graph(self, func, color=BLUE_E, opacity=0.9, **kwargs):
+    def get_graph(
+        self,
+        func,
+        color=BLUE_E,
+        opacity=0.9,
+        u_range=None,
+        v_range=None,
+        **kwargs
+    ) -> ParametricSurface:
         xu = self.x_axis.get_unit_size()
         yu = self.y_axis.get_unit_size()
         zu = self.z_axis.get_unit_size()
         x0, y0, z0 = self.get_origin()
+        u_range = u_range or self.x_range[:2]
+        v_range = v_range or self.y_range[:2]
         return ParametricSurface(
             lambda u, v: [xu * u + x0, yu * v + y0, zu * func(u, v) + z0],
-            u_range=self.x_range[:2],
-            v_range=self.y_range[:2],
+            u_range=u_range,
+            v_range=v_range,
             color=color,
             opacity=opacity,
             **kwargs
         )
+
+    def get_parametric_surface(
+        self,
+        func,
+        color=BLUE_E,
+        opacity=0.9,
+        **kwargs
+    ) -> ParametricSurface:
+        surface = ParametricSurface(func, color=color, opacity=opacity, **kwargs)
+        xu = self.x_axis.get_unit_size()
+        yu = self.y_axis.get_unit_size()
+        zu = self.z_axis.get_unit_size()
+        axes = [self.x_axis, self.y_axis, self.z_axis]
+        for dim, axis in zip(range(3), axes):
+            surface.stretch(axis.get_unit_size(), dim, about_point=ORIGIN)
+        surface.shift(self.get_origin())
+        return surface
 
 
 class NumberPlane(Axes):
@@ -639,6 +691,8 @@ class NumberPlane(Axes):
         lines2 = VGroup()
         inputs = np.arange(axis2.x_min, axis2.x_max + step, step)
         for i, x in enumerate(inputs):
+            if abs(x) < 1e-8:
+                continue
             new_line = line.copy()
             new_line.shift(axis2.n2p(x) - axis2.n2p(0))
             if i % (1 + ratio) == 0:
@@ -660,7 +714,7 @@ class NumberPlane(Axes):
         kwargs["buff"] = 0
         return Arrow(self.c2p(0, 0), self.c2p(*coords), **kwargs)
 
-    def prepare_for_nonlinear_transform(self, num_inserted_curves: int = 50):
+    def prepare_for_nonlinear_transform(self, num_inserted_curves: int = 50) -> Self:
         for mob in self.family_members_with_points():
             num_curves = mob.get_num_curves()
             if num_inserted_curves > num_curves:
@@ -699,7 +753,7 @@ class ComplexPlane(NumberPlane):
         skip_first: bool = True,
         font_size: int = 36,
         **kwargs
-    ):
+    ) -> Self:
         if numbers is None:
             numbers = self.get_default_coordinate_values(skip_first)
 

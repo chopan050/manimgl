@@ -12,6 +12,7 @@ from manimlib.utils.bezier import integer_interpolate
 from manimlib.utils.rate_functions import linear
 from manimlib.utils.rate_functions import double_smooth
 from manimlib.utils.rate_functions import smooth
+from manimlib.utils.simple_functions import clip
 
 from typing import TYPE_CHECKING
 
@@ -29,15 +30,6 @@ class ShowPartial(Animation, ABC):
     def __init__(self, mobject: Mobject, should_match_start: bool = False, **kwargs):
         self.should_match_start = should_match_start
         super().__init__(mobject, **kwargs)
-
-    def begin(self) -> None:
-        super().begin()
-        if not self.should_match_start:
-            self.mobject.lock_matching_data(self.mobject, self.starting_mobject)
-
-    def finish(self) -> None:
-        super().finish()
-        self.mobject.unlock_data()
 
     def interpolate_submobject(
         self,
@@ -107,18 +99,14 @@ class DrawBorderThenFill(Animation):
         self.mobject = vmobject
 
     def begin(self) -> None:
-        # Trigger triangulation calculation
-        for submob in self.mobject.get_family():
-            submob.get_triangulation()
-
+        self.mobject.set_animating_status(True)
         self.outline = self.get_outline()
         super().begin()
         self.mobject.match_style(self.outline)
-        self.mobject.lock_matching_data(self.mobject, self.outline)
 
     def finish(self) -> None:
         super().finish()
-        self.mobject.unlock_data()
+        self.mobject.refresh_joint_products()
 
     def get_outline(self) -> VMobject:
         outline = self.mobject.copy()
@@ -145,16 +133,14 @@ class DrawBorderThenFill(Animation):
         if index == 1 and self.sm_to_index[hash(submob)] == 0:
             # First time crossing over
             submob.set_data(outline.data)
-            submob.unlock_data()
-            if not self.mobject.has_updaters:
-                submob.lock_matching_data(submob, start)
-            submob.needs_new_triangulation = False
             self.sm_to_index[hash(submob)] = 1
 
         if index == 0:
             submob.pointwise_become_partial(outline, 0, subalpha)
         else:
             submob.interpolate(outline, start, subalpha)
+        submob.note_changed_stroke()
+        submob.note_changed_fill()
 
 
 class Write(DrawBorderThenFill):
@@ -206,6 +192,7 @@ class ShowIncreasingSubsets(Animation):
 
     def interpolate_mobject(self, alpha: float) -> None:
         n_submobs = len(self.all_submobs)
+        alpha = self.rate_func(alpha)
         index = int(self.int_func(alpha * n_submobs))
         self.update_submobject_list(index)
 
@@ -223,7 +210,7 @@ class ShowSubmobjectsOneByOne(ShowIncreasingSubsets):
         super().__init__(group, int_func=int_func, **kwargs)
 
     def update_submobject_list(self, index: int) -> None:
-        # N = len(self.all_submobs)
+        index = int(clip(index, 0, len(self.all_submobs) - 1))
         if index == 0:
             self.mobject.set_submobjects([])
         else:

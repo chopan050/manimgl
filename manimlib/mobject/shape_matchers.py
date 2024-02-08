@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from typing import Sequence
     from manimlib.mobject.mobject import Mobject
-    from manimlib.typing import ManimColor
+    from manimlib.typing import ManimColor, Self
 
 
 class SurroundingRectangle(Rectangle):
@@ -27,13 +27,20 @@ class SurroundingRectangle(Rectangle):
         color: ManimColor = YELLOW,
         **kwargs
     ):
-        super().__init__(
-            width=mobject.get_width() + 2 * buff,
-            height=mobject.get_height() + 2 * buff,
-            color=color,
-            **kwargs
-        )
-        self.move_to(mobject)
+        super().__init__(color=color, **kwargs)
+        self.buff = buff
+        self.surround(mobject)
+
+    def surround(self, mobject, buff=None) -> Self:
+        self.mobject = mobject
+        self.buff = buff if buff is not None else self.buff
+        super().surround(mobject, self.buff)
+        return self
+
+    def set_buff(self, buff) -> Self:
+        self.buff = buff
+        self.surround(self.mobject)
+        return self
 
 
 class BackgroundRectangle(SurroundingRectangle):
@@ -60,20 +67,20 @@ class BackgroundRectangle(SurroundingRectangle):
         )
         self.original_fill_opacity = fill_opacity
 
-    def pointwise_become_partial(self, mobject: Mobject, a: float, b: float):
+    def pointwise_become_partial(self, mobject: Mobject, a: float, b: float) -> Self:
         self.set_fill(opacity=b * self.original_fill_opacity)
         return self
 
-    def set_style_data(
+    def set_style(
         self,
         stroke_color: ManimColor | None = None,
         stroke_width: float | None = None,
         fill_color: ManimColor | None = None,
         fill_opacity: float | None = None,
         family: bool = True
-    ):
+    ) -> Self:
         # Unchangeable style, except for fill_opacity
-        VMobject.set_style_data(
+        VMobject.set_style(
             self,
             stroke_color=BLACK,
             stroke_width=0,
@@ -110,6 +117,7 @@ class Underline(Line):
         buff: float = SMALL_BUFF,
         stroke_color=WHITE,
         stroke_width: float | Sequence[float] = [0, 3, 3, 0],
+        stretch_factor=1.2,
         **kwargs
     ):
         super().__init__(
@@ -119,5 +127,6 @@ class Underline(Line):
             **kwargs
         )
         self.insert_n_curves(30)
-        self.match_width(mobject)
+        self.set_stroke(stroke_color, stroke_width)
+        self.set_width(mobject.get_width() * stretch_factor)
         self.next_to(mobject, DOWN, buff=buff)

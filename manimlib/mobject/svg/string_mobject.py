@@ -47,12 +47,9 @@ class StringMobject(SVGMobject, ABC):
         self,
         string: str,
         fill_color: ManimColor = WHITE,
+        fill_border_width: float = 0.5,
         stroke_color: ManimColor = WHITE,
         stroke_width: float = 0,
-        path_string_config: dict = dict(
-            should_subdivide_sharp_curves=True,
-            should_remove_null_curves=True,
-        ),
         base_color: ManimColor = WHITE,
         isolate: Selector = (),
         protect: Selector = (),
@@ -69,13 +66,10 @@ class StringMobject(SVGMobject, ABC):
         self.use_labelled_svg = use_labelled_svg
 
         self.parse()
-        super().__init__(
-            stroke_color=stroke_color,
-            fill_color=fill_color,
-            stroke_width=stroke_width,
-            path_string_config=path_string_config,
-            **kwargs
-        )
+        super().__init__(**kwargs)
+        self.set_stroke(stroke_color, stroke_width)
+        self.set_fill(fill_color, border_width=fill_border_width)
+        self.note_changed_stroke()
         self.labels = [submob.label for submob in self.submobjects]
 
     def get_file_path(self, is_labelled: bool = False) -> str:
@@ -561,7 +555,10 @@ class StringMobject(SVGMobject, ABC):
         return self.select_parts(selector)[index]
 
     def substr_to_path_count(self, substr: str) -> int:
-        return len(re.sub(R"\s", "", substr))
+        return len(re.sub(r"\s", "", substr))
+
+    def get_symbol_substrings(self):
+        return list(re.sub(r"\s", "", self.string))
 
     def select_unisolated_substring(self, pattern: str | re.Pattern) -> VGroup:
         if isinstance(pattern, str):
